@@ -1,3 +1,105 @@
-node_modules
-.expo
+# OSX
+.DS_Store
+
+# Xcode
+build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata
+*.xccheckout
+*.moved-aside
+DerivedData
+*.hmap
+*.ipa
+*.xcuserstate
+ios/.xcode.env.local
+ios/Pods/
+ios/build/
+
+# Android/IntelliJ
+build/
+.idea
+.gradle
+local.properties
+*.iml
+*.hprof
+android/app/release/
+*.aab
+.cxx/
+release/
+keystore.properties
+
+# node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+package-lock.json.old
+yarn.lock.old
+package-lock.json.bak
+
+# Bundle artifacts
+*.jsbundle
+*.bundle
+*.map
+
+# Expo
+.expo/
+web-build/
+dist/
+android-index.json
+ios-index.json
+.env
+.env.*
+!.env.example
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# Testing
+coverage/
+.jest/
+__snapshots__/
+junit.xml
+
+# Miscellaneous
 *.log
+*.orig
+.project
+*.iws
+.tmp
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.cache/
+.parcel-cache/
+
+# Temporary files created by Metro
+.metro-health-check*
+
+# Fastlane
+**/fastlane/report.xml
+**/fastlane/Preview.html
+**/fastlane/screenshots
+**/fastlane/test_output
+
+# Local credentials
+credentials.json
+google-services.json
+GoogleService-Info.plist
+sentry.properties
+
+# TypeScript
+*.tsbuildinfo
