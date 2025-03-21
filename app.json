@@ -25,20 +25,20 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"
       },
-      "package": "com.boats.aicompareboats"
+      "package": "com.boats.aicompareboats",
+      "softwareKeyboardLayoutMode": "pan"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "experiments": {
-      "newArchEnabled": true,
       "tsconfigPaths": true
     },
     "plugins": [
-      "expo-router",
       "expo-image-picker",
-      "expo-file-system",
-      "expo-image-manipulator"
-    ]
+      "expo-file-system"
+    ],
+    "jsEngine": "hermes",
+    "newArchEnabled": true
   }
 }
