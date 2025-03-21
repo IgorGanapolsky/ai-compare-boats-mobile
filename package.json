@@ -26,6 +26,7 @@
     "expo-file-system": "~16.0.0",
     "expo-image-manipulator": "~12.0.0",
     "expo-image-picker": "~14.7.0",
+    "expo-router": "^4.0.19",
     "expo-status-bar": "~1.11.0",
     "openai": "^4.83.0",
     "react": "18.2.0",

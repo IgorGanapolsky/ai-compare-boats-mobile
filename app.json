@@ -29,6 +29,16 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "experiments": {
+      "newArchEnabled": true,
+      "tsconfigPaths": true
+    },
+    "plugins": [
+      "expo-router",
+      "expo-image-picker",
+      "expo-file-system",
+      "expo-image-manipulator"
+    ]
   }
 }
