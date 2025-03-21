@@ -5,15 +5,19 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, Text } from 'react-native';
 import AppNavigator from './src/navigation/AppNavigator';
 import { ThemeProvider } from './src/theme/ThemeProvider';
+import { LogBox } from 'react-native';
+
+LogBox.ignoreLogs(['Unsupported top level event type "topInsetsChange" dispatched']);
 
 export default function App() {
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Test imports early to catch any issues
     const testImports = async () => {
       try {
-        // Try importing all shared packages
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         const coreModule = await import('@boats/core');
         console.log('@boats/core imported successfully', typeof coreModule.analyzeBoatImage);
         
@@ -23,14 +27,24 @@ export default function App() {
         const typesModule = await import('@boats/types');
         console.log('@boats/types imported successfully', Object.keys(typesModule));
         
+        setIsLoading(false);
       } catch (e) {
         console.error('Import error:', e);
         setError(e instanceof Error ? e.message : 'Unknown error loading modules');
+        setIsLoading(false);
       }
     };
     
     testImports();
   }, []);
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <Text style={{ fontSize: 18 }}>Loading AI Compare Boats...</Text>
+      </View>
+    );
+  }
 
   if (error) {
     return (

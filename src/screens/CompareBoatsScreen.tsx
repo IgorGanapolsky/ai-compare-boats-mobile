@@ -1,212 +1,281 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { useState, useCallback, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  Platform,
+  Alert
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { useTheme } from '../theme/ThemeProvider';
+import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { analyzeBoatImage } from '@boats/core';
+import { getBoatDetails } from '@boats/api';
+import type { BoatDetails } from '@boats/types';
 
-interface AnalysisResult {
-  boatType: string;
-  confidence: number;
-  features: string[];
-}
-
-const CompareBoatsScreen: React.FC = () => {
-  const { theme } = useTheme();
+const CompareBoatsScreen = () => {
   const [image, setImage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<string | null>(null);
+  const [similarBoats, setSimilarBoats] = useState<BoatDetails[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const navigation = useNavigation();
 
   useEffect(() => {
-    // Test if we can access the shared packages
-    const testSharedPackages = async () => {
-      try {
-        console.log('Testing @boats/core import...');
-        console.log('analyzeBoatImage type:', typeof analyzeBoatImage);
-        
-        // If we get here, the import is working
-        setImportError(null);
-      } catch (error) {
-        console.error('Error testing shared packages:', error);
-        setImportError(error instanceof Error ? error.message : 'Unknown error');
+    // Check for required permissions on mount
+    (async () => {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        setError('Permission to access media library is required!');
       }
-    };
-    
-    testSharedPackages();
+    })();
   }, []);
 
-  const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
-    if (status !== 'granted') {
-      alert('Sorry, we need camera roll permissions to make this work!');
-      return;
-    }
-    
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-    });
-    
-    if (!result.canceled && result.assets && result.assets.length > 0) {
-      const imageUri = result.assets[0].uri;
-      processImage(imageUri);
-    }
-  };
-
-  const takePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    
-    if (status !== 'granted') {
-      alert('Sorry, we need camera permissions to make this work!');
-      return;
-    }
-    
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-    });
-    
-    if (!result.canceled && result.assets && result.assets.length > 0) {
-      const imageUri = result.assets[0].uri;
-      processImage(imageUri);
-    }
-  };
-
-  const processImage = async (uri: string) => {
+  const pickImage = useCallback(async () => {
     try {
-      setLoading(true);
-      setImage(uri);
-      setResult(null);
-      
-      // Resize the image to reduce processing time
-      const resizedImage = await ImageManipulator.manipulateAsync(
-        uri,
-        [{ resize: { width: 300 } }],
-        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-      );
-      
-      // Convert image to base64
-      const base64 = await FileSystem.readAsStringAsync(resizedImage.uri, {
-        encoding: FileSystem.EncodingType.Base64,
+      // Reset states
+      setError(null);
+      setAnalysisResult(null);
+      setSimilarBoats([]);
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
       });
-      
-      console.log('About to call analyzeBoatImage...');
-      
-      try {
-        // Use shared package to analyze the image
-        const analysisResult = await analyzeBoatImage(base64);
-        console.log('Analysis result:', analysisResult);
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        // Process the image
+        const selectedImage = result.assets[0];
         
-        setResult({
-          boatType: analysisResult.boatType,
-          confidence: analysisResult.confidence,
-          features: analysisResult.features,
-        });
-      } catch (analyzeError) {
-        console.error('Error in analyzeBoatImage:', analyzeError);
-        alert(`Analysis error: ${analyzeError instanceof Error ? analyzeError.message : 'Unknown error'}`);
+        // Resize image to reduce file size
+        const manipulatedImage = await ImageManipulator.manipulateAsync(
+          selectedImage.uri,
+          [{ resize: { width: 800 } }],
+          { format: ImageManipulator.SaveFormat.JPEG, compress: 0.7 }
+        );
+        
+        setImage(manipulatedImage.uri);
       }
-    } catch (error) {
-      console.error('Error processing image:', error);
-      alert('Failed to process image. Please try again.');
+    } catch (err) {
+      console.error('Error picking image:', err);
+      setError('Failed to select image. Please try again.');
+    }
+  }, []);
+
+  const takePicture = useCallback(async () => {
+    try {
+      // Reset states
+      setError(null);
+      setAnalysisResult(null);
+      setSimilarBoats([]);
+
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        setError('Camera permission is required to take pictures');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        // Process the image
+        const selectedImage = result.assets[0];
+        
+        // Resize image to reduce file size
+        const manipulatedImage = await ImageManipulator.manipulateAsync(
+          selectedImage.uri,
+          [{ resize: { width: 800 } }],
+          { format: ImageManipulator.SaveFormat.JPEG, compress: 0.7 }
+        );
+        
+        setImage(manipulatedImage.uri);
+      }
+    } catch (err) {
+      console.error('Error taking picture:', err);
+      setError('Failed to take picture. Please try again.');
+    }
+  }, []);
+
+  const analyzeImage = useCallback(async () => {
+    if (!image) return;
+
+    try {
+      setIsAnalyzing(true);
+      setError(null);
+
+      // Convert image URI to base64 or file object as needed
+      const fileInfo = await FileSystem.getInfoAsync(image);
+      if (!fileInfo.exists) {
+        throw new Error('Image file does not exist');
+      }
+
+      // For testing progress updates
+      const onProgress = (progress: number) => {
+        console.log(`Analysis progress: ${progress * 100}%`);
+      };
+
+      try {
+        // Call the analyze function from the shared package
+        console.log('Calling analyzeBoatImage from @boats/core');
+        const result = await analyzeBoatImage(image, onProgress);
+        console.log('Analysis result:', result);
+        setAnalysisResult(result.description);
+
+        // Get similar boats based on the analysis
+        if (result && result.boatType) {
+          const boatIds = ['1', '2', '3']; // Mock IDs for demonstration
+          const boatsPromises = boatIds.map(id => getBoatDetails(id));
+          const boats = await Promise.all(boatsPromises);
+          setSimilarBoats(boats);
+        }
+      } catch (analysisError) {
+        console.error('Error during boat analysis:', analysisError);
+        // Use a mock analysis for development/testing
+        const mockResult = {
+          boatType: 'yacht',
+          manufacturer: 'Example',
+          year: 2023,
+          length: 42,
+          description: 'This appears to be a luxury yacht with sleek design, approximately 40-45 feet in length.'
+        };
+        
+        setAnalysisResult(mockResult.description);
+        Alert.alert('Using Mock Data', 'Real analysis failed, using sample data instead');
+        
+        // Get mock similar boats
+        const boatIds = ['1', '2', '3'];
+        const boatsPromises = boatIds.map(id => getBoatDetails(id));
+        const boats = await Promise.all(boatsPromises);
+        setSimilarBoats(boats);
+      }
+    } catch (err) {
+      console.error('Error analyzing image:', err);
+      setError('Failed to analyze image. Please try again or select a different image.');
     } finally {
-      setLoading(false);
+      setIsAnalyzing(false);
+    }
+  }, [image]);
+
+  // Wrapped with a try-catch to prevent crashes
+  const renderSafeContent = () => {
+    try {
+      return (
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+          <ScrollView contentContainerStyle={styles.scrollContent}>
+            <Text style={styles.title}>Compare Boats</Text>
+            
+            {error && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
+            
+            <View style={styles.imageContainer}>
+              {image ? (
+                <Image source={{ uri: image }} style={styles.boatImage} />
+              ) : (
+                <View style={styles.placeholderImage}>
+                  <Text style={styles.placeholderText}>Select a boat image</Text>
+                </View>
+              )}
+            </View>
+            
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity
+                style={styles.button}
+                onPress={pickImage}
+                disabled={isAnalyzing}
+              >
+                <Text style={styles.buttonText}>Select Image</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.button}
+                onPress={takePicture}
+                disabled={isAnalyzing}
+              >
+                <Text style={styles.buttonText}>Take Picture</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {image && (
+              <TouchableOpacity
+                style={[styles.analyzeButton, isAnalyzing && styles.disabledButton]}
+                onPress={analyzeImage}
+                disabled={isAnalyzing}
+              >
+                {isAnalyzing ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.buttonText}>Analyze Boat</Text>
+                )}
+              </TouchableOpacity>
+            )}
+            
+            {analysisResult && (
+              <View style={styles.resultContainer}>
+                <Text style={styles.resultTitle}>Analysis Result:</Text>
+                <Text style={styles.resultText}>{analysisResult}</Text>
+              </View>
+            )}
+            
+            {similarBoats.length > 0 && (
+              <View style={styles.similarBoatsContainer}>
+                <Text style={styles.resultTitle}>Similar Boats:</Text>
+                {similarBoats.map((boat, index) => (
+                  <TouchableOpacity
+                    key={boat.id}
+                    style={styles.boatCard}
+                    onPress={() => {
+                      // @ts-ignore - Navigation typing might not be complete
+                      navigation.navigate('BoatDetail', { boat });
+                    }}
+                  >
+                    <Text style={styles.boatCardTitle}>{boat.name}</Text>
+                    <Text>Type: {boat.type}</Text>
+                    <Text>Manufacturer: {boat.manufacturer}</Text>
+                    <Text>Year: {boat.year}</Text>
+                    <Text>Length: {boat.length} ft</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      );
+    } catch (renderError) {
+      console.error('Render error:', renderError);
+      return (
+        <View style={styles.container}>
+          <Text style={styles.errorText}>
+            Something went wrong with the display. Please restart the app.
+          </Text>
+        </View>
+      );
     }
   };
-
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={styles.content}>
-        <Text style={[styles.title, { color: theme.colors.text }]}>Compare Boats</Text>
-        
-        {importError && (
-          <Text style={[styles.errorText, { color: theme.colors.error }]}>
-            Error testing shared packages: {importError}
-          </Text>
-        )}
-        
-        <View style={styles.imageContainer}>
-          {image ? (
-            <Image source={{ uri: image }} style={styles.image} />
-          ) : (
-            <View style={[styles.placeholder, { backgroundColor: theme.colors.card }]}>
-              <Text style={{ color: theme.colors.text }}>No image selected</Text>
-            </View>
-          )}
-        </View>
-        
-        <View style={styles.buttonRow}>
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: theme.colors.primary }]}
-            onPress={pickImage}
-            disabled={loading}
-          >
-            <Text style={[styles.buttonText, { color: theme.colors.background }]}>
-              Pick from Gallery
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: theme.colors.primary }]}
-            onPress={takePhoto}
-            disabled={loading}
-          >
-            <Text style={[styles.buttonText, { color: theme.colors.background }]}>
-              Take Photo
-            </Text>
-          </TouchableOpacity>
-        </View>
-        
-        {loading && (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={theme.colors.primary} />
-            <Text style={[styles.loadingText, { color: theme.colors.text }]}>
-              Analyzing image...
-            </Text>
-          </View>
-        )}
-        
-        {result && (
-          <View style={[styles.resultContainer, { backgroundColor: theme.colors.card }]}>
-            <Text style={[styles.resultTitle, { color: theme.colors.text }]}>
-              Analysis Result:
-            </Text>
-            <Text style={[styles.resultText, { color: theme.colors.text }]}>
-              Boat Type: {result.boatType}
-            </Text>
-            <Text style={[styles.resultText, { color: theme.colors.text }]}>
-              Confidence: {(result.confidence * 100).toFixed(2)}%
-            </Text>
-            <Text style={[styles.resultTitle, { color: theme.colors.text, marginTop: 10 }]}>
-              Features:
-            </Text>
-            {result.features.map((feature, index) => (
-              <Text 
-                key={index} 
-                style={[styles.featureText, { color: theme.colors.text }]}
-              >
-                • {feature}
-              </Text>
-            ))}
-          </View>
-        )}
-      </View>
-    </SafeAreaView>
-  );
+  
+  return renderSafeContent();
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#f8f9fa',
   },
-  content: {
+  scrollContent: {
     padding: 20,
   },
   title: {
@@ -215,53 +284,65 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     textAlign: 'center',
   },
-  errorText: {
-    fontSize: 16,
-    marginBottom: 10,
-  },
   imageContainer: {
-    alignItems: 'center',
+    width: '100%',
+    height: 250,
+    borderRadius: 10,
+    overflow: 'hidden',
     marginBottom: 20,
+    backgroundColor: '#e9ecef',
   },
-  image: {
-    width: 300,
-    height: 300,
-    borderRadius: 10,
+  boatImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
   },
-  placeholder: {
-    width: 300,
-    height: 300,
-    borderRadius: 10,
+  placeholderImage: {
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#e9ecef',
   },
-  buttonRow: {
+  placeholderText: {
+    color: '#6c757d',
+    fontSize: 16,
+  },
+  buttonContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
     marginBottom: 20,
   },
   button: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    flex: 1,
+    backgroundColor: '#007bff',
+    padding: 12,
     borderRadius: 8,
-    elevation: 3,
+    alignItems: 'center',
+    marginHorizontal: 5,
+  },
+  analyzeButton: {
+    backgroundColor: '#28a745',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  disabledButton: {
+    backgroundColor: '#6c757d',
   },
   buttonText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  loadingText: {
-    marginTop: 10,
+    color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
   },
   resultContainer: {
     padding: 15,
-    borderRadius: 10,
-    marginTop: 20,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
   },
   resultTitle: {
     fontSize: 18,
@@ -269,13 +350,34 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   resultText: {
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  similarBoatsContainer: {
+    marginBottom: 20,
+  },
+  boatCard: {
+    padding: 15,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+  },
+  boatCardTitle: {
     fontSize: 16,
+    fontWeight: 'bold',
     marginBottom: 5,
   },
-  featureText: {
-    fontSize: 14,
-    marginLeft: 10,
-    marginBottom: 3,
+  errorContainer: {
+    padding: 10,
+    backgroundColor: '#f8d7da',
+    borderRadius: 5,
+    marginBottom: 20,
+  },
+  errorText: {
+    color: '#721c24',
+    textAlign: 'center',
   },
 });
 
